@@ -1,0 +1,6 @@
+Used barabasi_albert with m=0.5*network_parameter*num_nodes+1
+
+fixed_params = dict(num_nodes=20, demand=3, productivity=0.4,
+                    resource_inequality=0.5, uncertainty=0.2)
+variable_params = dict(network_parameter=np.linspace(0, 1, 51)[1:],
+                       capacity_inequality=np.linspace(0,0.75,51)[1:])
