@@ -15,66 +15,11 @@ from mesa.time import RandomActivation, StagedActivation
 from mesa.space import NetworkGrid
 from mesa.datacollection import DataCollector
 
+from init_graph import create_graph
+from reporters import gini_capacity, gini_resources
+from reporters import average_clustering, assortativity, number_of_components
+from reporters import num_satisfied, num_dissatisfied
 
-def random_graph(n, p): 
-    return nx.erdos_renyi_graph(n=n, p=p)
-
-def small_world(n, p):
-        return nx.newman_watts_strogatz_graph(n=n, k=2, p=p)
-
-def scale_free(n, p):
-        return nx.barabasi_albert_graph(n=n, m=0.5*p*n + 1)
-
-
-shapes = dict.fromkeys(['random', 'erdos_renyi', 'erdos', 'er'], random_graph)
-shapes.update(dict.fromkeys(['small_world', 'watts_strogatz', 'watts', 'ws'], 
-                            small_world))
-shapes.update(dict.fromkeys(['scale_free', 'barabasi_albert', 'barabasi', 'ba'], 
-                            scale_free))
-
-
-def create_graph(shape, num_nodes, p):    
-    return shapes[shape](num_nodes, p)
-
-
-def gini_coefficient (model, attribute):
-    agent_attribute_list = [getattr(a, attribute) for a in model.grid.get_all_cell_contents()]
-    total = sum(agent_attribute_list)
-    disparities = 0
-    for a_i, a_j in itertools.permutations(agent_attribute_list, 2):
-        disparities += math.fabs(a_i - a_j)
-    try:
-        return disparities/(2*total*model.num_nodes)
-    except ZeroDivisionError:
-        return 0
-
-def gini_capacity(model):
-    return gini_coefficient(model, 'capacity')
-
-def gini_resources(model):
-    return gini_coefficient(model, 'resources')
-
-def network_measure(model, measure):
-    m = getattr(nx, measure)
-    return m(model.G)
-
-def average_clustering(model):
-    return network_measure(model, "average_clustering")
-
-def assortativity(model):
-    try:
-        return network_measure(model, "degree_assortativity_coefficient")
-    except ValueError:
-        return 0
-
-def number_of_components(model):
-    return network_measure(model, "number_connected_components")
-
-def num_satisfied(model):
-    return sum([1 for a in model.grid.get_all_cell_contents() if a.satisfied is True])
-
-def num_dissatisfied(model):
-    return (model.num_nodes - num_satisfied(model))
 
 def calculate_transfer(p, c_1, c_2, t):
     c_hi, c_lo = (c_1, c_2) if c_1 > c_2 else (c_2, c_1)
@@ -116,7 +61,7 @@ class RegimeModel(Model):
     # A model of a regime, with some number of agents
 
     def __init__(self, num_nodes, productivity, demand, network_parameter, shape,
-                 resource_inequality, capacity_inequality, uncertainty):
+                 resource_inequality, capacity_inequality, uncertainty, shock):
 
         # Construct a graph
         self.num_nodes = num_nodes
@@ -140,6 +85,8 @@ class RegimeModel(Model):
                                             "Gini Coeff. of Resources": gini_resources,
                                             "Satisfied": num_satisfied,
                                             "Dissatisfied": num_dissatisfied})
+        self.shock = shock
+
         for i, node in enumerate(self.G.nodes()):
             a = RegimeAgent(i, self, self.demand, 
                             math.exp(paretovariate(1/resource_inequality)),
@@ -181,9 +128,9 @@ class RegimeModel(Model):
 
     def run_model(self, n):
         for i in range(n):
-            # Halfway through the simulation, add shock
-            if i == n//2:
-                self.productivity -= 0.2
+            if i == n//2: 
+                # Halfway through simulation, add shock.
+                self.productivity += self.shock
             self.step()
 
 class RegimeAgent(Agent):

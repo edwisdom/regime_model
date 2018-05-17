@@ -1,6 +1,0 @@
-For the longer version, the simulation was run for 10 steps instead of 5. The results of the model did not noticeably change.
-
-fixed_params = dict(num_nodes=20, demand=3, capacity_inequality=0.5,
-                    resource_inequality=0.5, uncertainty=0.2)
-variable_params = dict(productivity=np.linspace(0, 1, 51)[1:],
-                       network_parameter=np.linspace(0,1,51)[1:])

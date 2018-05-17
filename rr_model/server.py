@@ -5,7 +5,7 @@ from mesa.visualization.UserParam import UserSettableParameter
 from mesa.visualization.modules import ChartModule
 from mesa.visualization.modules import NetworkModule
 from mesa.visualization.modules import TextElement
-from .new_model import RegimeModel, num_satisfied, num_dissatisfied, gini_resources, gini_capacity
+from .model import RegimeModel, num_satisfied, num_dissatisfied, gini_resources, gini_capacity
 
 
 def network_portrayal(G):
