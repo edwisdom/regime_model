@@ -7,10 +7,34 @@ from operator import attrgetter
 import networkx as nx
 import numpy as np
 
+import pandas as pd 
+import matplotlib.pyplot as plt
+
 from mesa import Agent, Model
 from mesa.time import RandomActivation, StagedActivation
-from mesa.datacollection import DataCollector
 from mesa.space import NetworkGrid
+from mesa.datacollection import DataCollector
+
+
+def random_graph(n, p): 
+    return nx.erdos_renyi_graph(n=n, p=p)
+
+def small_world(n, p):
+        return nx.newman_watts_strogatz_graph(n=n, k=2, p=p)
+
+def scale_free(n, p):
+        return nx.barabasi_albert_graph(n=n, m=0.5*p*n + 1)
+
+
+shapes = dict.fromkeys(['random', 'erdos_renyi', 'erdos', 'er'], random_graph)
+shapes.update(dict.fromkeys(['small_world', 'watts_strogatz', 'watts', 'ws'], 
+                            small_world))
+shapes.update(dict.fromkeys(['scale_free', 'barabasi_albert', 'barabasi', 'ba'], 
+                            scale_free))
+
+
+def create_graph(shape, num_nodes, p):    
+    return shapes[shape](num_nodes, p)
 
 
 def gini_coefficient (model, attribute):
@@ -19,13 +43,32 @@ def gini_coefficient (model, attribute):
     disparities = 0
     for a_i, a_j in itertools.permutations(agent_attribute_list, 2):
         disparities += math.fabs(a_i - a_j)
-    return disparities/(2*total*model.num_nodes)
+    try:
+        return disparities/(2*total*model.num_nodes)
+    except ZeroDivisionError:
+        return 0
 
 def gini_capacity(model):
     return gini_coefficient(model, 'capacity')
 
 def gini_resources(model):
     return gini_coefficient(model, 'resources')
+
+def network_measure(model, measure):
+    m = getattr(nx, measure)
+    return m(model.G)
+
+def average_clustering(model):
+    return network_measure(model, "average_clustering")
+
+def assortativity(model):
+    try:
+        return network_measure(model, "degree_assortativity_coefficient")
+    except ValueError:
+        return 0
+
+def number_of_components(model):
+    return network_measure(model, "number_connected_components")
 
 def num_satisfied(model):
     return sum([1 for a in model.grid.get_all_cell_contents() if a.satisfied is True])
@@ -35,13 +78,24 @@ def num_dissatisfied(model):
 
 def calculate_transfer(p, c_1, c_2, t):
     c_hi, c_lo = (c_1, c_2) if c_1 > c_2 else (c_2, c_1)
-    patron_gain = math.exp(p*(c_hi+t)) - math.exp(p*c_hi)
-    client_loss = math.exp(p*c_lo) - math.exp(p*(c_lo-t))
-    return math.sqrt(patron_gain*client_loss)
+    try:
+        patron_gain = math.exp(p*(c_hi+t)) - math.exp(p*c_hi)
+        client_loss = math.exp(p*c_lo) - math.exp(p*(c_lo-t))
+        return math.sqrt(patron_gain*client_loss)
+    except OverflowError:
+        client_loss = math.exp(p*c_lo) - math.exp(p*(c_lo-t))
+        return math.sqrt(c_hi)*client_loss
+
 
 def utility(d, r, c):
-        resource_u = 2/(1+math.exp(-r + d))
-        capacity_u = (math.sinh(c)/math.sinh(d))
+        try:    
+            resource_u = 2/(1+math.exp(-r + d))
+        except OverflowError:
+            resource_u = 2
+        try:
+            capacity_u = (math.sinh(c)/math.sinh(d))
+        except OverflowError:
+            capacity_u = 1e6
         return resource_u*capacity_u
 
 def delta_u(d, r_old, c_old, r_new, c_new):
@@ -61,12 +115,12 @@ def average(a_list):
 class RegimeModel(Model):
     # A model of a regime, with some number of agents
 
-    def __init__(self, num_nodes, productivity, demand, network_parameter,
+    def __init__(self, num_nodes, productivity, demand, network_parameter, shape,
                  resource_inequality, capacity_inequality, uncertainty):
 
         # Construct a graph
         self.num_nodes = num_nodes
-        self.G = nx.erdos_renyi_graph(n=self.num_nodes, p=network_parameter)
+        self.G = create_graph(shape, num_nodes, network_parameter)
         
         # Take the largest connected component
         self.G = max(nx.connected_component_subgraphs(self.G), key=lambda g: len(g.nodes()))
@@ -87,9 +141,9 @@ class RegimeModel(Model):
                                             "Satisfied": num_satisfied,
                                             "Dissatisfied": num_dissatisfied})
         for i, node in enumerate(self.G.nodes()):
-            a = RegimeAgent(i, self, self.productivity, self.demand, 
+            a = RegimeAgent(i, self, self.demand, 
                             math.exp(paretovariate(1/resource_inequality)),
-                            paretovariate(1/capacity_inequality),
+                            min(25, paretovariate(1/capacity_inequality)),
                             True)
             self.schedule.add(a)
             self.grid.place_agent(a, node)
@@ -127,14 +181,16 @@ class RegimeModel(Model):
 
     def run_model(self, n):
         for i in range(n):
+            # Halfway through the simulation, add shock
+            if i == n//2:
+                self.productivity -= 0.2
             self.step()
 
 class RegimeAgent(Agent):
-    def __init__(self, unique_id, model, productivity, demand, resources, 
+    def __init__(self, unique_id, model, demand, resources, 
                 capacity, satisfied):
         super().__init__(unique_id, model)
 
-        self.productivity = productivity
         self.demand = demand
         self.resources = resources
         self.capacity = capacity
@@ -176,7 +232,7 @@ class RegimeAgent(Agent):
     def ranked_candidates(self, candidates, capacity_t):
         delta_utilities = []
         for c in candidates:
-            resource_t = calculate_transfer(self.productivity, self.capacity,
+            resource_t = calculate_transfer(self.model.productivity, self.capacity,
                                             c.capacity, capacity_t)
             is_patron = (self.capacity > c.capacity)
             is_adding = True
@@ -185,14 +241,13 @@ class RegimeAgent(Agent):
                                    is_patron, is_adding)
             delta_utilities.append(delta_u)
         pos_utilities = [(a,u) for (a,u) in zip(candidates, delta_utilities) if u>0]
-        print(pos_utilities)
         ranked_agents = list(reversed([a for (a,u) in sorted(pos_utilities, key=lambda x: x[1])]))
         return ranked_agents
 
     def initialize_link(self, other, capacity_t):
         patron, client = ((self, other) if self.capacity > other.capacity 
                                        else (other, self))
-        resource_t = calculate_transfer(self.productivity, patron.capacity,
+        resource_t = calculate_transfer(self.model.productivity, patron.capacity,
                                         client.capacity, capacity_t)
         if resource_t < patron.resources and capacity_t < client.capacity:
             link = (patron.pos, client.pos)
@@ -205,32 +260,25 @@ class RegimeAgent(Agent):
             self.model.G.edges[link]['resource_t'] = resource_t
             self.model.G.edges[link]['exp_resources'] = [resource_t, resource_t]
             self.model.G.edges[link]['patron'] = patron
-            print("New edge: " + str(self.model.G.edges[link]))
             return True
         else:
             return False
 
     def add_link(self):
-        print("Number of edges: " + str(len(self.model.G.edges)))
         self.exp_resources = max(0, (self.resources + self.link_resources() 
-            - self.demand + math.exp(self.productivity * self.capacity)))
+            - self.demand + math.exp(self.model.productivity * self.capacity)))
         two_neighbors = self.neighbor_of_neighbors()
         neighbor_agents = self.model.grid.get_cell_list_contents(two_neighbors)
         exp_capacity_t = self.expected_transfer()
         ranked_agents = self.ranked_candidates(neighbor_agents, exp_capacity_t)
         for a in ranked_agents:
-            resource_t = calculate_transfer(a.productivity, a.capacity,
+            resource_t = calculate_transfer(a.model.productivity, a.capacity,
                                             self.capacity, exp_capacity_t)
             is_patron = a.capacity > self.capacity
             is_adding = True
             delta_u = (utility_gain(a.demand, a.exp_resources, a.capacity, 
                                     resource_t, exp_capacity_t,
                                     is_patron, is_adding))
-            print(is_patron)
-            print(a.demand, a.exp_resources, a.capacity, 
-            resource_t, exp_capacity_t,
-            is_patron, is_adding)
-            print(delta_u)
             capacity_t = expovariate(1/self.model.uncertainty)
             if delta_u > 0 and self.initialize_link(a, capacity_t):
                 break
@@ -265,7 +313,7 @@ class RegimeAgent(Agent):
 
 
     def settle_env_transfer(self):
-        self.resources = (math.exp(self.productivity*self.capacity)
+        self.resources = (math.exp(self.model.productivity*self.capacity)
                           - self.demand)
         self.satisfied = self.resources > 0
         self.resources = self.satisfied*self.resources
