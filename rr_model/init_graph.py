@@ -10,10 +10,10 @@ def random_graph(n, p):
     return nx.erdos_renyi_graph(n=n, p=p)
 
 def small_world(n, p):
-        return nx.newman_watts_strogatz_graph(n=n, k=2, p=p)
+    return nx.newman_watts_strogatz_graph(n=n, k=2, p=p)
 
 def scale_free(n, p):
-        return nx.barabasi_albert_graph(n=n, m=0.5*p*n + 1)
+    return nx.barabasi_albert_graph(n=n, m=0.5*p*n + 1)
 
 
 # Initialize shapes to map strings indicating shape to a graph-generator
@@ -31,5 +31,5 @@ def create_graph(shape, num_nodes, p):
 	shape -- String indicating the network topology
 	num_nodes -- Integer indicating number of nodes
 	p -- Float controlling network connectivity, 0 < p <= 1
-	"""    
-    return shapes[shape](num_nodes, p)
+	"""
+	return shapes[shape](num_nodes, p)

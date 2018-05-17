@@ -9,7 +9,7 @@ from model import assortativity, number_of_components
 
 fixed_params = dict(num_nodes=20, demand=3, productivity=0.4, shape='ws',
                     resource_inequality=0.5, uncertainty=0.2, shock=-0.2)
-variable_params = dict(network_parameter=np.linspace(0, 1, 51)[1:],
+variable_params = dict(network_param=np.linspace(0, 1, 51)[1:],
                        capacity_inequality=np.linspace(0,0.75,51)[1:])
 model_reporter = {"Ratio Satisfied": lambda m: num_satisfied(m)/m.num_nodes,
                   "Average Clustering": lambda m: average_clustering(m),

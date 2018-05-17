@@ -5,16 +5,14 @@ import itertools
 from operator import attrgetter
 
 import networkx as nx
-import numpy as np
 
-import pandas as pd 
-import matplotlib.pyplot as plt
-
+# Use agent-based modeling library, Mesa
 from mesa import Agent, Model
-from mesa.time import RandomActivation, StagedActivation
+from mesa.time import StagedActivation
 from mesa.space import NetworkGrid
 from mesa.datacollection import DataCollector
 
+# Use modules to initialize network and report data
 from init_graph import create_graph
 from reporters import gini_capacity, gini_resources
 from reporters import average_clustering, assortativity, number_of_components
@@ -22,31 +20,50 @@ from reporters import num_satisfied, num_dissatisfied
 
 
 def calculate_transfer(p, c_1, c_2, t):
+    """Calculates the resources to be transferred over a link."""
+
     c_hi, c_lo = (c_1, c_2) if c_1 > c_2 else (c_2, c_1)
     try:
         patron_gain = math.exp(p*(c_hi+t)) - math.exp(p*c_hi)
         client_loss = math.exp(p*c_lo) - math.exp(p*(c_lo-t))
-        return math.sqrt(patron_gain*client_loss)
+        return math.sqrt(patron_gain*client_loss) # Geometric mean
     except OverflowError:
         client_loss = math.exp(p*c_lo) - math.exp(p*(c_lo-t))
         return math.sqrt(c_hi)*client_loss
 
 
 def utility(d, r, c):
-        try:    
-            resource_u = 2/(1+math.exp(-r + d))
-        except OverflowError:
-            resource_u = 2
-        try:
-            capacity_u = (math.sinh(c)/math.sinh(d))
-        except OverflowError:
-            capacity_u = 1e6
-        return resource_u*capacity_u
+    """
+        Calculates the utility function for a given level of demand,
+        resources, and capacity
+    """
+    try:    
+        resource_u = 2/(1+math.exp(-r + d))
+    except OverflowError:
+        resource_u = 2
+    try:
+        capacity_u = (math.sinh(c)/math.sinh(d))
+    except OverflowError:
+        capacity_u = 1e6
+    return resource_u*capacity_u
 
 def delta_u(d, r_old, c_old, r_new, c_new):
+    """Returns the utility differential of new r,c-values over old ones"""
     return (utility(d, r_new, c_new) - utility(d, r_old, c_old))
 
 def utility_gain(d, r, c, resource_t, capacity_t, is_patron, is_adding):
+    """Returns the utility gain in performing some action
+
+    Arguments:
+    d -- Demand
+    r -- Resources
+    c -- Capacity
+    resource_t -- The expected resource transfer
+    capacity_t -- The expected capacity transfer
+    is_patron -- A bool indicating whether the actor is a patron
+    is_adding -- A bool indicating whether we're adding a link 
+    """
+
     # Patrons, when adding links, gain capacity and lose resources. (0)
     # Clients, when adding links, lose capacity and gain resources. (1)
     # Patrons, when removing links, lose capacity and gain resources. (1)
@@ -55,25 +72,28 @@ def utility_gain(d, r, c, resource_t, capacity_t, is_patron, is_adding):
     return (delta_u(d, r, c, r+(p_i*resource_t), c-(p_i*capacity_t)))
 
 def average(a_list):
+    """Returns an arithmetic average of a list of numbers"""
     return sum(a_list)/len(a_list)
 
 class RegimeModel(Model):
-    # A model of a regime, with some number of agents
+    # A model of a regime
 
-    def __init__(self, num_nodes, productivity, demand, network_parameter, shape,
+    def __init__(self, num_nodes, productivity, demand, shape, network_param,
                  resource_inequality, capacity_inequality, uncertainty, shock):
 
-        # Construct a graph
+        # Initialize graph
         self.num_nodes = num_nodes
-        self.G = create_graph(shape, num_nodes, network_parameter)
-        
-        # Take the largest connected component
-        self.G = max(nx.connected_component_subgraphs(self.G), key=lambda g: len(g.nodes()))
+        self.G = create_graph(shape, num_nodes, network_param)
+        self.G = max(nx.connected_component_subgraphs(self.G), 
+                     key=lambda g: len(g.nodes()))
         
         # Initialize other attributes
         self.grid = NetworkGrid(self.G)
         self.schedule = StagedActivation(self, 
-                                         stage_list=['add_link', 'cut_link', 'settle_env_transfer', 'settle_link_transfer'],
+                                         stage_list=['add_link', 'cut_link',
+                                                    'settle_env_transfer', 
+                                                    'settle_link_transfer'
+                                                    ],
                                          shuffle=True,
                                          shuffle_between_stages=True)
         self.productivity = productivity
@@ -81,12 +101,15 @@ class RegimeModel(Model):
         self.resource_inequality = resource_inequality
         self.capacity_inequality = capacity_inequality
         self.uncertainty = uncertainty
-        self.datacollector = DataCollector({"Gini Coeff. of Capacity": gini_capacity,
-                                            "Gini Coeff. of Resources": gini_resources,
-                                            "Satisfied": num_satisfied,
-                                            "Dissatisfied": num_dissatisfied})
+        self.datacollector = DataCollector({
+                                "Gini Coeff. of Capacity": gini_capacity,
+                                "Gini Coeff. of Resources": gini_resources,
+                                "Satisfied": num_satisfied,
+                                "Dissatisfied": num_dissatisfied
+                            })
         self.shock = shock
 
+        # Initialize agents on graph (cap capacity at 25 to avoid overflow errors)
         for i, node in enumerate(self.G.nodes()):
             a = RegimeAgent(i, self, self.demand, 
                             math.exp(paretovariate(1/resource_inequality)),
@@ -95,14 +118,16 @@ class RegimeModel(Model):
             self.schedule.add(a)
             self.grid.place_agent(a, node)
 
+            
         for e in self.G.edges():
-            # Calculate capacity and resources to be transferred over the edge
             capacity_transfer = expovariate(1/self.uncertainty)
-            agents = [self.G.nodes[e[0]]['agent'][0], self.G.nodes[e[1]]['agent'][0]]
+            agents = ([self.G.nodes[e[0]]['agent'][0], 
+                     self.G.nodes[e[1]]['agent'][0]])
             resource_transfer = calculate_transfer(self.productivity,
                                 agents[0].capacity + capacity_transfer,
                                 agents[1].capacity + capacity_transfer,
                                 capacity_transfer)
+            
             # Give the agent with the higher capacity 2*transfer capacity to
             # simulate a prior interaction where the transfer was made, when
             # both the nodes had their current capacity + transfer.
@@ -110,7 +135,6 @@ class RegimeModel(Model):
             min_capacity_agent = min(agents, key=attrgetter('capacity'))
             max_capacity_agent.capacity += 2*capacity_transfer
             min_capacity_agent.exp_resources += resource_transfer
-
 
             # Initialize edge attributes for transfer rates, memory of 
             # resource transfers, and which agent is the patron.
