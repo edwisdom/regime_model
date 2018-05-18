@@ -47,9 +47,11 @@ def utility(d, r, c):
         capacity_u = 1e6
     return resource_u*capacity_u
 
+
 def delta_u(d, r_old, c_old, r_new, c_new):
     """Returns the utility differential of new r,c-values over old ones"""
     return (utility(d, r_new, c_new) - utility(d, r_old, c_old))
+
 
 def utility_gain(d, r, c, resource_t, capacity_t, is_patron, is_adding):
     """Returns the utility gain in performing some action
@@ -71,9 +73,11 @@ def utility_gain(d, r, c, resource_t, capacity_t, is_patron, is_adding):
     p_i = 2*(is_patron^is_adding) - 1 # P_i is 1 in case 1, and -1 in case 0
     return (delta_u(d, r, c, r+(p_i*resource_t), c-(p_i*capacity_t)))
 
+
 def average(a_list):
     """Returns an arithmetic average of a list of numbers"""
     return sum(a_list)/len(a_list)
+
 
 class RegimeModel(Model):
     # A model of a regime
@@ -157,6 +161,7 @@ class RegimeModel(Model):
                 self.productivity += self.shock
             self.step()
 
+
 class RegimeAgent(Agent):
     def __init__(self, unique_id, model, demand, resources, 
                 capacity, satisfied):
@@ -169,6 +174,7 @@ class RegimeAgent(Agent):
         self.satisfied = True
 
     def neighbor_of_neighbors(self):
+        """ Returns neighbors of neighbors of an agent """
         neighbors = self.model.grid.get_neighbors(self.pos)
         two_neighbors = set()
         
@@ -181,19 +187,23 @@ class RegimeAgent(Agent):
         return list(two_neighbors.difference(neighbors))
 
     def expected_transfer(self):
+        """Returns the expected transfer cost by an agent"""
         links = self.model.G.edges(self.pos)
         transfers = 0
         for l in links:
             transfers += self.model.G.edges[l]['capacity_t']
+        # Average all link transfers to create an estimate
         try:
             return transfers/len(links)
         except ZeroDivisionError:
             return expovariate(1/self.model.uncertainty)
 
     def link_resources(self):
+        """Calculates how many resources an agent expects from links"""
         links = self.model.G.edges(self.pos)
         exp_resource_gain = 0
         for l in links:
+            # Take an average of the last two transactions for expectation
             resource_t = average(self.model.G.edges[l]['exp_resources'])
             r_gain = (-resource_t if self.model.G.edges[l]['patron'] == self
                                  else resource_t)
@@ -201,6 +211,14 @@ class RegimeAgent(Agent):
         return exp_resource_gain
 
     def ranked_candidates(self, candidates, capacity_t):
+        """
+        Returns a ranked list of candidates where it would be a 
+        positive-utility action to form a link.
+
+        Arguments:
+        candidates -- List of possible candidates (neighbors-of-neighbors)
+        capacity_t -- The agent's expected capacity transfer
+        """
         delta_utilities = []
         for c in candidates:
             resource_t = calculate_transfer(self.model.productivity, self.capacity,
@@ -211,16 +229,24 @@ class RegimeAgent(Agent):
                                    self.capacity, resource_t, capacity_t,
                                    is_patron, is_adding)
             delta_utilities.append(delta_u)
+        # Filter out positive utilities and then sort agents by utility
         pos_utilities = [(a,u) for (a,u) in zip(candidates, delta_utilities) if u>0]
         ranked_agents = list(reversed([a for (a,u) in sorted(pos_utilities, key=lambda x: x[1])]))
         return ranked_agents
 
     def initialize_link(self, other, capacity_t):
+        """
+        If initializing a link with a transfer size of capacity_t
+        between self and other agent is possible, the function does so
+        and returns True. Else, it returns false.
+        """
         patron, client = ((self, other) if self.capacity > other.capacity 
                                        else (other, self))
         resource_t = calculate_transfer(self.model.productivity, patron.capacity,
                                         client.capacity, capacity_t)
         if resource_t < patron.resources and capacity_t < client.capacity:
+            # Change agent's properties once link is formed, and initialize
+            # edge attributes. 
             link = (patron.pos, client.pos)
             self.model.G.add_edge(*link)
             patron.capacity += capacity_t
@@ -236,6 +262,12 @@ class RegimeAgent(Agent):
             return False
 
     def add_link(self):
+        """
+        Stage 1/4 of each simulation time-step: Agents get to add 1 link max.
+
+        Rank neighbor-of-neighbors by the utility of adding a link to them,
+        if they 'agree' to a link (utility > 0), try to add it.
+        """
         self.exp_resources = max(0, (self.resources + self.link_resources() 
             - self.demand + math.exp(self.model.productivity * self.capacity)))
         two_neighbors = self.neighbor_of_neighbors()
@@ -251,26 +283,38 @@ class RegimeAgent(Agent):
                                     resource_t, exp_capacity_t,
                                     is_patron, is_adding))
             capacity_t = expovariate(1/self.model.uncertainty)
+            # Once we've added a link, the stage ends
             if delta_u > 0 and self.initialize_link(a, capacity_t):
                 break
 
     def remove_edge(self, edge, self_patron):
+        """Remove an edge between self and other and undo the transaction."""
         other_pos = edge[1] if edge[0] == self.pos else edge[0]
         other_agent = self.model.grid.get_cell_list_contents([other_pos])[0]
-        p_i = 2*(self_patron) - 1
+        p_i = 2*(self_patron) - 1 # 1 if self is patron, -1 otherwise
         capacity_t = p_i*self.model.G.edges[edge]['capacity_t']
         resource_t = p_i*(average(self.model.G.edges[edge]['exp_resources']))
         other_agent.capacity += capacity_t
+        # Note that capacity gets transferred back, but resources don't get
+        # "repaid." Any resources sent over a link are unrecoverable. 
         other_agent.exp_resources -= resource_t
         self.capacity -= capacity_t
         self.exp_resources += resource_t
         self.model.G.remove_edge(*edge)
 
-
     def cut_link(self):
+        """
+        Stage 2/4 of each simulation time-step. Agents get to cut 1 link max.
+
+        If an agent has more than 1 link, and they find that one lowers their
+        utility, they cut it. The agents search their links in random order.
+        """
         edges = self.model.G.edges(self.pos)
         if len(edges) > 1:
             for e in edges:
+                # Agents use their memory of the transaction history to
+                # evaluate the utility of a link, not the value of a
+                # promised transaction.
                 resource_t = average(self.model.G.edges[e]['exp_resources'])
                 capacity_t = self.model.G.edges[e]['capacity_t']
                 is_patron = (self.model.G.edges[e]['patron'] == self)
@@ -282,17 +326,21 @@ class RegimeAgent(Agent):
                     self.remove_edge(e, is_patron)
                     break
 
-
     def settle_env_transfer(self):
+        """Stage 3/4 of each simulation time-step: Environmental transfers"""
         self.resources = (math.exp(self.model.productivity*self.capacity)
                           - self.demand)
         self.satisfied = self.resources > 0
+        # Resources cannot become negative, so we reset them to 0, and 
+        # simply indicate dissatisfaction for not meeting demand. 
         self.resources = self.satisfied*self.resources
 
     def pay_client(self, edge):
+        """Pay the client on the other side of an edge"""
         client_pos = edge[1] if edge[0] == self.pos else edge[0]
         client = self.model.grid.get_cell_list_contents([client_pos])[0]
         resources_to_pay = self.model.G.edges[edge]['resource_t']
+        # If possible, pay what the client is owed. Else, pay what you can.
         resources_paid = (resources_to_pay if self.resources > resources_to_pay  
                                            else self.resources)
         self.resources -= resources_paid
@@ -301,6 +349,7 @@ class RegimeAgent(Agent):
                         self.model.G.edges[edge]['exp_resources'][0]])
 
     def settle_link_transfer(self):
+        """Stage 4/4 of each simulation time-step: Pay all clients"""
         for e in self.model.G.edges(self.pos):
             if self.model.G.edges[e]['patron'] == self:
                 self.pay_client(e)
