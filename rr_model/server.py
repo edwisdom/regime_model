@@ -63,7 +63,9 @@ model_params = {
                                           description='Set environmental productivity'),
     'demand': UserSettableParameter('slider', 'Demand', 3, 1, 10, 0.1,
                                     description='Agent per-turn demand'),
-    'network_parameter': UserSettableParameter('slider', 'Network Parameter', 0.3, 0.0, 1.0, 0.05,
+    'shape': UserSettableParameter('choice', 'Network Topology', value='random', 
+                                   choices=['random', 'scale_free', 'small_world']),
+    'network_param': UserSettableParameter('slider', 'Network Parameter', 0.3, 0.0, 1.0, 0.05,
                                                  description='Probability of a link'),
     'resource_inequality': UserSettableParameter('slider', 'Resource Inequality', 0.5, 0.1, 2.0, 0.1,
                                                    description='Initial resource inequality'),
@@ -71,6 +73,8 @@ model_params = {
                                              description='Initial capacity inequality'),
     'uncertainty': UserSettableParameter('slider', 'Transaction Uncertainty', 0.2, 0.1, 2.0, 0.1,
                                                     description='Uncertainty about transaction costs'),
+    'shock': UserSettableParameter('slider', 'Shock Multiple', 0.5, 0.2, 2, 0.1,
+                                   description='Shock multiple, with 1 being no shock')
 }
 
 server = ModularServer(RegimeModel, [network, MyTextElement(), chart], 'Regime Model', model_params)

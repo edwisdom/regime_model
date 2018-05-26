@@ -13,10 +13,10 @@ from mesa.space import NetworkGrid
 from mesa.datacollection import DataCollector
 
 # Use modules to initialize network and report data
-from init_graph import create_graph
-from reporters import gini_capacity, gini_resources
-from reporters import average_clustering, assortativity, number_of_components
-from reporters import num_satisfied, num_dissatisfied
+from .init_graph import create_graph
+from .reporters import gini_capacity, gini_resources
+from .reporters import average_clustering, assortativity, number_of_components
+from .reporters import num_satisfied, num_dissatisfied
 
 
 def calculate_transfer(p, c_1, c_2, t):
@@ -158,7 +158,7 @@ class RegimeModel(Model):
         for i in range(n):
             if i == n//2: 
                 # Halfway through simulation, add shock.
-                self.productivity += self.shock
+                self.productivity *= self.shock
             self.step()
 
 

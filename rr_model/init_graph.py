@@ -13,7 +13,7 @@ def small_world(n, p):
     return nx.newman_watts_strogatz_graph(n=n, k=2, p=p)
 
 def scale_free(n, p):
-    return nx.barabasi_albert_graph(n=n, m=0.5*p*n + 1)
+    return nx.barabasi_albert_graph(n=n, m=int(0.5*p*n + 1))
 
 
 # Initialize shapes to map strings indicating shape to a graph-generator
