@@ -4,24 +4,30 @@ import math
 from mpl_toolkits.mplot3d import Axes3D
 import matplotlib.pyplot as plt
 from matplotlib import cm
+from enum import Enum
+
 from matplotlib.ticker import LinearLocator, FormatStrFormatter
 import numpy as np
 import os
 
 PATH = "."
 
-fio_1 = ("network_and_p_longer.pkl", 
-		["Productivity", "Connectivity"],
-		["Ratio Satisfied", "Gini Capacity", "Gini Resources"])
+shock_strings = {'pos': 'with Positive Shock', 
+				 'neg': 'with Negative Shock',
+				 '': 'with No Shock'}
 
 def create_fio(filename):
 	file = filename[:-4] # Remove .pkl extension
-	is_neg, network = (True, file[:-3]) if file[-3:] == 'neg' else (False, file)
-	network = (network.replace("_", " ")).title() + " Network"
+	shock_tag = file[-3:]
+	if shock_tag == 'neg' or shock_tag == 'pos':
+		shock, network = (shock_strings[file[-3:]], file[:-3])
+	else:
+		shock, network = (shock_strings[''], file)
+	network = (network.replace("_", " ")).title() + "Network "
 	return (filename, ["Connectivity", "Capacity"],
 			["Ratio Satisfied", "Average Clustering", 
 			"Assortativity", "Number of Components"],
-			network, is_neg)
+			network, shock)
 
 def get_measure(df, X, Y, measure):
 	return np.array(df[measure]).reshape(X.shape[0], Y.shape[0])
@@ -56,8 +62,7 @@ def read_files():
 			(unpack_fio(create_fio(filename)))
 
 def unpack_fio(fio):
-	filename, inputs, outputs, network, is_neg = fio
-	shock = " with Negative Shock" if is_neg else " with No Shock"
+	filename, inputs, outputs, network, shock = fio
 	df = pd.read_pickle(filename)
 	for output in outputs:
 		draw_plot(df, inputs, output, network, shock)
